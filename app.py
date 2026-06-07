@@ -2,13 +2,13 @@ import datetime
 import xml.etree.ElementTree as ET
 import re
 import requests
-import streamlit as str  # Standard alias is st, using str carefully here
+import streamlit as str  # Using standard clean wrapper
 
 # Configure the page
-str.set_page_config(page_title="Kenya Job Screener & Scam Detector", layout="wide")
+str.set_page_config(page_title="Kenya Job Hub & Verification Screener", layout="wide")
 
-str.title("🇰🇪 Kenya Job Screener & Scam Detector")
-str.markdown("This app scans job aggregator networks for openings posted in the last 48 hours, categorizes them, and filters out high-risk scams.")
+str.title("🇰🇪 Kenya Job Hub & Scam Detector")
+str.markdown("This live system extracts newly posted jobs in Kenya (under 48 hours old) across aggregator networks, extracts critical application details, and screens them for employment fraud.")
 
 # Configuration
 JOB_FEEDS = [
@@ -42,6 +42,47 @@ def classify_job(title, description):
         return "📈 Sales & Marketing"
     else:
         return "📁 General / Other"
+
+def extract_job_details(title, description):
+    """Intelligently parses unstructured job text for required fields."""
+    combined_text = (title + " " + description).lower()
+    
+    # 1. Onsite vs Remote vs Hybrid
+    if any(w in combined_text for w in ["remote", "work from home", "wfh", "virtual"]):
+        work_type = "🏠 Remote"
+    elif "hybrid" in combined_text:
+        work_type = "🔄 Hybrid"
+    else:
+        work_type = "🏢 Onsite"
+        
+    # 2. City or Town Detection
+    cities = ["nairobi", "mombasa", "kisumu", "nakuru", "eldoret", "thika", "malindi", "kitale", "garissa", "kakamega", "nyeri", "machakos", "naivasha", "meru", "kiambu", "kericho", "kisii"]
+    city_found = "Not explicit (Likely Nairobi)"
+    for city in cities:
+        if city in combined_text:
+            city_found = city.title()
+            break
+
+    # 3. Expiry / Deadline Tracking
+    deadline_match = re.search(r'(deadline|closing date|apply before|expires on)[:\s]+([\w\s,.\d/-]+)', combined_text)
+    expiry = "See link for deadline details"
+    if deadline_match:
+        extracted = deadline_match.group(2).strip()
+        # Clean up snippet boundaries
+        words = extracted.split()[:4]
+        if len(words) > 0:
+            expiry = " ".join(words).title().strip(",.")
+
+    # 4. Qualifications Extraction
+    # Look for common requirement header markers
+    qual_regex = r'(requirements|qualifications|key skills|what you need)[:\s]+([^.]+)'
+    qual_match = re.search(qual_regex, combined_text)
+    if qual_match and len(qual_match.group(2).strip()) > 10:
+        qualifications = qual_match.group(2).strip().capitalize() + "."
+    else:
+        qualifications = "Degree/Diploma or relevant experience in the respective field. See direct link for full checklist."
+
+    return work_type, city_found, expiry, qualifications
 
 def analyze_scam_risk(title, description):
     score = 0
@@ -98,45 +139,75 @@ def fetch_and_parse_feeds():
                     if pub_date >= two_days_ago:
                         status, reasons = analyze_scam_risk(title, desc_clean)
                         category = classify_job(title, desc_clean)
+                        work_type, city, expiry, qualifications = extract_job_details(title, desc_clean)
                         
+                        # Generate shorter preview description
+                        preview_desc = desc_clean[:280] + "..." if len(desc_clean) > 280 else desc_clean
+
                         jobs_found.append({
                             "Title": title,
                             "Category": category,
                             "Status": status,
                             "Red Flags": ", ".join(reasons) if reasons else "None",
                             "Date Posted": pub_date.strftime("%Y-%m-%d %H:%M"),
-                            "Link": link
+                            "Link": link,
+                            "Work Type": work_type,
+                            "City": city,
+                            "Expiry": expiry,
+                            "Qualifications": qualifications,
+                            "Description": preview_desc
                         })
-        except Exception as e:
+        except Exception:
             pass
     return jobs_found
 
-# Streamlit Interface Controls
+# --- UI Interface Layout ---
 if str.button("🔄 Scan the Web Now"):
-    with str.spinner("Fetching data from online networks..."):
+    with str.spinner("Connecting to live aggregator feeds..."):
         data = fetch_and_parse_feeds()
         if data:
             str.success(f"Successfully processed {len(data)} live jobs from the last 48 hours!")
             
-            # Sidebar layout filters
+            # Setup dynamic data filter pickers
             categories = list(set([j["Category"] for j in data]))
             selected_cat = str.multiselect("Filter by Category", options=categories, default=categories)
             
             statuses = list(set([j["Status"] for j in data]))
             selected_status = str.multiselect("Filter by Safety Status", options=statuses, default=statuses)
             
-            # Filter rows
             filtered_data = [j for j in data if j["Category"] in selected_cat and j["Status"] in selected_status]
             
-            # Display results
+            str.markdown("### 🎯 Filtered Job Results")
+            
+            # Render cleanly structured data layouts
             for job in filtered_data:
                 with str.container():
                     str.subheader(job["Title"])
-                    str.write(f"**Category:** {job['Category']} | **Posted:** {job['Date Posted']}")
-                    str.write(f"**Verification Status:** {job['Status']}")
+                    
+                    # Columns for structural meta data
+                    col1, col2, col3, col4 = str.columns(4)
+                    with col1:
+                        str.write(f"**📍 City/Town:** {job['City']}")
+                    with col2:
+                        str.write(f"**💼 Setup:** {job['Work Type']}")
+                    with col3:
+                        str.write(f"**📅 Posted:** {job['Date Posted']}")
+                    with col4:
+                        str.write(f"**⏳ Deadline:** {job['Expiry']}")
+                        
+                    str.write(f"**🛡️ Security Status:** {job['Status']}")
                     if job['Red Flags'] != "None":
-                        str.warning(f"Warning Details: {job['Red Flags']}")
-                    str.markdown(f"[Click Here to View Application Link]({job['Link']})")
+                        str.error(f"🚩 Verification Flags: {job['Red Flags']}")
+                    
+                    # Core Details Expander blocks
+                    with str.expander("📄 View Job Description & Requirements Summary"):
+                        str.write("**Job Summary:**")
+                        str.write(job["Description"])
+                        str.write("**Key Qualifications Found:**")
+                        str.write(job["Qualifications"])
+                    
+                    # Direct Link Layout
+                    str.markdown(f"👉 **[Click Here to Open Direct Application Page]({job['Link']})**")
                     str.markdown("---")
         else:
-            str.info("No jobs found in the last 48 hours. Try refreshing later.")
+            str.info("No new jobs found in the last 48 hours. Try running the scan again later!")
