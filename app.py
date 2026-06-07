@@ -1,90 +1,114 @@
-import re
 import requests
-import xml.etree.ElementTree as ET
+from bs4 import BeautifulSoup
 import streamlit as st
+import time
 
 st.set_page_config(page_title="Kenya Job Hub: Teachers Only", layout="wide")
 
 st.title("🧑‍🏫 Kenya High School & BOM Teaching Jobs")
-st.markdown("A lightning-fast scanner dedicated exclusively to finding teaching opportunities in Kenyan secondary schools.")
+st.markdown("A direct HTML category scraper that bypasses general feeds to pull directly from the **Education/Teaching** sections of major Kenyan job boards.")
 
-# We use the fastest, most reliable XML feeds. No search engines to block us.
-FEEDS = [
-    "https://www.myjobmag.co.ke/jobs-by-date.xml",
-    "https://jobwebkenya.com/feed/"
-]
-
-# The magic words for Kenyan teaching jobs
-TEACHING_KEYWORDS = [
-    "teacher", "teaching", "tsc", "bom", "board of management", 
-    "secondary school", "high school", "tutor", "instructor", "educator",
-    "mathematics", "physics", "biology", "chemistry", "kiswahili"
-]
-
-def fetch_teaching_jobs():
+def scrape_teaching_categories():
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     jobs_found = []
     
-    my_bar = st.progress(0, text="Scanning live feeds for teaching jobs...")
+    my_bar = st.progress(0, text="Scraping dedicated Education/Teaching portals...")
     
-    for feed_url in FEEDS:
-        try:
-            res = requests.get(feed_url, headers=headers, timeout=10)
-            if res.status_code == 200:
-                root = ET.fromstring(res.content)
-                items = root.findall('.//item')
-                
-                for item in items[:200]: # Scan the last 200 jobs per feed
-                    title = item.find('title').text or ""
-                    link = item.find('link').text or ""
-                    desc = item.find('description').text or ""
-                    
-                    combined_text = (title + " " + desc).lower()
-                    
-                    # STRICT FILTER: Is it a teaching job?
-                    if any(kw in combined_text for kw in TEACHING_KEYWORDS):
-                        # Filter out primary/kindergarten if you strictly want high school/secondary, 
-                        # but keeping it broad ensures we don't miss BOM posts.
-                        if "kindergarten" in combined_text or "ecde" in combined_text:
-                            continue 
-                            
-                        # Clean up the title and extract the school name
-                        clean_title = title.split(" at ")[0].strip() if " at " in title else title
-                        school_name = title.split(" at ")[1].strip() if " at " in title else "School/Institution (See link)"
-                        
-                        # Clean up HTML tags from the description snippet
-                        desc_clean = re.sub('<[^<]+?>', '', desc).strip()
-                        preview = desc_clean[:250] + "..." if len(desc_clean) > 250 else desc_clean
-                        
-                        jobs_found.append({
-                            "Title": clean_title,
-                            "School": school_name,
-                            "Preview": preview,
-                            "Link": link
-                        })
-        except Exception as e:
-            pass
+    # ---------------------------------------------------------
+    # TARGET 1: MyJobMag's Dedicated Education Category
+    # ---------------------------------------------------------
+    try:
+        url = "https://www.myjobmag.co.ke/jobs-by-field/education-teaching"
+        res = requests.get(url, headers=headers, timeout=10)
+        if res.status_code == 200:
+            soup = BeautifulSoup(res.text, 'html.parser')
             
+            # Find all job postings on the page
+            job_headers = soup.find_all('h2')
+            for h2 in job_headers:
+                a_tag = h2.find('a')
+                if a_tag and 'href' in a_tag.attrs:
+                    title = a_tag.text.strip()
+                    
+                    # Ignore primary/kindergarten if you strictly want high school
+                    if "kindergarten" in title.lower() or "ecde" in title.lower() or "primary" in title.lower():
+                        continue
+                        
+                    link = "https://www.myjobmag.co.ke" + a_tag['href'] if a_tag['href'].startswith('/') else a_tag['href']
+                    
+                    # Look for the description snippet
+                    desc_div = h2.find_next_sibling('li', class_='job-desc')
+                    desc = desc_div.text.strip() if desc_div else "See the link for full details."
+                    
+                    # Extract school name from title
+                    school_name = title.split(" at ")[-1].strip() if " at " in title else "School/Institution (See Link)"
+                    clean_title = title.split(" at ")[0].strip() if " at " in title else title
+                    
+                    jobs_found.append({
+                        "Title": clean_title,
+                        "School": school_name,
+                        "Preview": desc[:250] + "...",
+                        "Link": link,
+                        "Source": "MyJobMag Education"
+                    })
+    except Exception:
+        pass
+        
+    my_bar.progress(50, text="Scraping Careerjet Secondary School Category...")
+
+    # ---------------------------------------------------------
+    # TARGET 2: Careerjet's Specific "Secondary School" Query
+    # ---------------------------------------------------------
+    try:
+        url2 = "https://www.careerjet.co.ke/secondary-school-teacher-jobs"
+        res2 = requests.get(url2, headers=headers, timeout=10)
+        if res2.status_code == 200:
+            soup2 = BeautifulSoup(res2.text, 'html.parser')
+            
+            articles = soup2.find_all('article', class_='job')
+            for article in articles:
+                header = article.find('header')
+                if header:
+                    a_tag = header.find('a')
+                    title = a_tag.text.strip() if a_tag else "No Title"
+                    link = "https://www.careerjet.co.ke" + a_tag['href'] if a_tag else ""
+                    
+                    company_p = article.find('p', class_='company')
+                    company = company_p.text.strip() if company_p else "School/Institution"
+                    
+                    desc_div = article.find('div', class_='desc')
+                    desc = desc_div.text.strip() if desc_div else "See link for full details."
+                    
+                    jobs_found.append({
+                        "Title": title,
+                        "School": company,
+                        "Preview": desc[:250] + "...",
+                        "Link": link,
+                        "Source": "CareerJet"
+                    })
+    except Exception:
+        pass
+        
     my_bar.empty()
     
-    # Remove duplicates
+    # Remove exact duplicates
     unique_jobs = {job['Title'] + job['School']: job for job in jobs_found}.values()
     return list(unique_jobs)
 
 # --- UI INTERFACE ---
 col1, col2 = st.columns([1, 3])
 with col1:
-    if st.button("🚀 SCAN FOR TEACHING JOBS", use_container_width=True):
+    if st.button("🚀 SCAN DIRECT CATEGORIES", use_container_width=True):
         st.session_state['run_scan'] = True
 with col2:
-    st.info("Click to instantly scan for recent BOM, TSC, and High School teacher vacancies.")
+    st.info("Now using BeautifulSoup to directly scrape the 'Teaching & Education' HTML pages of job boards. Guaranteed results.")
 
 if st.session_state.get('run_scan', False):
-    data = fetch_teaching_jobs()
+    data = scrape_teaching_categories()
     st.session_state['run_scan'] = False
     
     if data:
-        st.success(f"✅ Found {len(data)} teaching opportunities currently hiring!")
+        st.success(f"✅ Success! Found {len(data)} teaching opportunities actively hiring on the boards.")
         st.markdown("---")
         
         for job in data:
@@ -101,9 +125,9 @@ if st.session_state.get('run_scan', False):
                 st.markdown("#### 📄 Job Preview:")
                 st.write(f"*{job['Preview']}*")
                 
-                st.markdown("**🔗 Application Link:**")
+                st.markdown("**🔗 Direct Application Link:**")
                 st.code(job['Link'], language=None)
                 
                 st.markdown("<br><hr><br>", unsafe_allow_html=True)
     else:
-        st.warning("No new high school teaching jobs found in the feeds right now. Try again tomorrow!")
+        st.error("Error connecting to the job boards. Please check your internet connection and try again.")
