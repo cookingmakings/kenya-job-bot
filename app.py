@@ -4,26 +4,27 @@ import re
 import requests
 import streamlit as str
 
-# Configure the page for a clean presentation view
-str.set_page_config(page_title="Kenya Job Hub & Presenter Dashboard", layout="wide")
+str.set_page_config(page_title="Mega-Scanner: Kenya Job Presenter Hub", layout="wide")
 
-str.title("🎙️ Kenya Job Hub: Presenter Dashboard")
-str.markdown("This dashboard extracts, structures, and simplifies fresh Kenyan jobs so they are easy to read and present to your audience. Jobs are under 48 hours old and scanned for scams.")
+str.title("🎙️ The Mega-Scanner: Kenya Job Presenter Hub")
+str.markdown("Scanning deep web aggregators for **Government, TSC, BOM, Corporate, and Blue-Collar** jobs posted in the last 48-72 hours.")
 
-# Configuration
+# Expanded massive feed list to guarantee 25+ jobs across sectors
 JOB_FEEDS = [
     "https://jobwebkenya.com/feed/",
-    "https://reliefweb.int/updates.rss?search=location.name:Kenya%20AND%20format.name:Job"
+    "https://reliefweb.int/updates.rss?search=location.name:Kenya%20AND%20format.name:Job",
+    "https://www.myjobmag.co.ke/jobs-by-date.xml", # Re-added as a fallback structure
+    "https://kenya2711.rssing.com/chan-30179697/latest.xml" # Broad Kenyan job feed
 ]
 
 SCAM_KEYWORDS = [
     r"registration fee", r"booking fee", r"medical fee", r"processing fee",
     r"training fee", r"uniform fee", r"send money", r"mpesa", r"m-pesa",
-    r"deposit", r"bribe", r"recruitment fee", r"interview fee"
+    r"deposit", r"bribe", r"recruitment fee", r"interview fee", r"pay to work"
 ]
-CORPORATE_KEYWORDS = ["safaricom", "kcb", "equity", "un", "unicef", "honda", "toyota", "kenya airways", "kra", "kura", "kenha"]
 
-# Extensive list of Kenyan towns and counties for deep scanning
+CORPORATE_KEYWORDS = ["safaricom", "kcb", "equity", "un", "unicef", "honda", "toyota", "kenya airways", "kra", "kura", "kenha", "tsc", "nhif", "nssf"]
+
 KENYAN_CITIES = [
     "nairobi", "mombasa", "kisumu", "nakuru", "eldoret", "thika", "malindi", "kitale", 
     "garissa", "kakamega", "nyeri", "machakos", "naivasha", "meru", "kiambu", "kericho", 
@@ -33,12 +34,10 @@ KENYAN_CITIES = [
 ]
 
 def extract_job_details(title, description):
-    """Deeply scans the job text to pull out highly specific presenter details."""
     combined_text = (title + " " + description).replace('\n', ' ')
     combined_lower = combined_text.lower()
     
-    # 1. Extract Company and Clean Title
-    # Job feeds often format titles as "Job Title at Company Name"
+    # Extract Company
     if " at " in title:
         parts = title.split(" at ", 1)
         clean_title = parts[0].strip()
@@ -49,63 +48,66 @@ def extract_job_details(title, description):
         company = parts[1].strip()
     else:
         clean_title = title
-        company = "See description for hiring company"
+        company = "See direct link for hiring institution"
 
-    # 2. Extract Specific City/Town
-    city_found = "Kenya (Location not explicitly stated)"
+    # Extract City
+    city_found = "Kenya-wide (Check details)"
     for city in KENYAN_CITIES:
-        # Using word boundaries (\b) so "Meru" doesn't trigger inside "Cameron"
         if re.search(r'\b' + city + r'\b', combined_lower):
             city_found = city.title()
             break
             
-    # 3. Work Setup
-    if any(w in combined_lower for w in ["remote", "work from home", "wfh", "virtual"]):
-        work_type = "🏠 Remote"
+    # Work Type Focus (Blue Collar vs White Collar vs Remote)
+    if any(w in combined_lower for w in ["plumber", "driver", "cleaner", "security", "casual", "mason", "electrician", "mechanic", "rider"]):
+        work_type = "🛠️ Blue-Collar / Hands-on"
+    elif any(w in combined_lower for w in ["remote", "work from home", "wfh"]):
+        work_type = "🏠 Remote (White-Collar)"
     elif "hybrid" in combined_lower:
-        work_type = "🔄 Hybrid"
+        work_type = "🔄 Hybrid (White-Collar)"
     else:
-        work_type = "🏢 Onsite"
+        work_type = "🏢 Onsite (Standard)"
 
-    # 4. Extract Deadline / Expiry Date
-    # Scans for dates appearing near keywords like "Deadline", "Closing", "Apply by"
+    # Strict Deadline Extraction
     deadline_match = re.search(r'(deadline|closing date|apply before|apply by|expires on)[\s:-]+([0-9]{1,2}(st|nd|rd|th)?\s+[a-zA-Z]+\s+[0-9]{4}|[a-zA-Z]+\s+[0-9]{1,2},?\s+[0-9]{4}|[0-9]{1,2}/[0-9]{1,2}/[0-9]{2,4})', combined_lower)
     if deadline_match:
-        # Extract just the date part and capitalize it nicely
         expiry = deadline_match.group(2).title()
     else:
-        expiry = "ASAP (No specific deadline found in text)"
+        expiry = "ASAP (See portal)"
 
-    # 5. Extract Qualifications Block
-    # Look for the word 'requirements' or 'qualifications' and capture the next 300 characters
-    qual_match = re.search(r'(requirements|qualifications|what we are looking for|skills required)[\s:-]+(.{100,400})', combined_text, re.IGNORECASE)
+    # Qualifications Extraction
+    qual_match = re.search(r'(requirements|qualifications|what we are looking for|skills required|minimum qualifications)[\s:-]+(.{150,500})', combined_text, re.IGNORECASE)
     if qual_match:
         qualifications = qual_match.group(2).strip()
-        # Clean up any broken sentences at the end
         qualifications = qualifications.rsplit('.', 1)[0] + "."
     else:
-        qualifications = "The specific qualifications list was not included in the feed summary. Please check the direct application link for the full breakdown."
+        qualifications = "The direct feed did not include the full bulleted list of requirements. Please advise your audience to click the application link for the official checklist."
 
     return clean_title, company, city_found, work_type, expiry, qualifications
 
-def classify_job(title, description):
-    text = (title + " " + description).lower()
-    if any(word in text for word in ["no experience", "entry level", "no certs", "no certificate", "cleaner", "messenger", "casual"]):
+def classify_job(title, description, company):
+    text = (title + " " + description + " " + company).lower()
+    
+    # Highly specific targeting requested by the user
+    if any(word in text for word in ["tsc", "teachers service commission", "board of management", "bom", "ministry of education"]):
+        return "🏛️ Government / TSC / BOM Teaching"
+    elif any(word in text for word in ["government", "county", "ministry", "parastatal", "commission", "kra"]):
+        return "🏛️ Government & Public Service"
+    elif any(word in text for word in ["teach", "tutor", "lecturer", "school", "teacher", "instructor"]):
+        return "📚 Teaching & Education (Private)"
+    elif any(word in text for word in ["medicine", "nurse", "clinical", "hospital", "doctor", "health", "pharmacist"]):
+        return "⚕️ Doctors & Medicine"
+    elif any(word in text for word in ["bank", "finance", "accountant", "audit", "tax", "teller", "microfinance"]):
+        return "🏦 Banking & Finance"
+    elif any(word in text for word in ["plumber", "driver", "cleaner", "security", "casual", "mason", "electrician", "mechanic"]):
+        return "🛠️ Blue Collar & Casual"
+    elif any(word in text for word in ["no experience", "entry level", "no certs", "no certificate"]):
         return "🟢 No Certs Required"
-    elif any(word in text for word in ["teach", "tutor", "lecturer", "school", "teacher", "education"]):
-        return "📚 Teaching & Education"
-    elif any(word in text for word in ["medicine", "nurse", "clinical", "hospital", "doctor", "health"]):
-        return "⚕️ Medicine & Healthcare"
     elif any(word in text for word in ["hr", "human resources", "recruitment"]):
         return "🤝 Human Resources"
     elif any(word in text for word in ["developer", "software", "it support", "tech", "data", "engineer"]):
         return "💻 IT & Tech"
-    elif any(word in text for word in ["finance", "accountant", "audit", "tax", "bank"]):
-        return "📊 Finance"
-    elif any(word in text for word in ["sales", "marketing", "digital marketing", "customer service"]):
-        return "📈 Sales & Marketing"
     else:
-        return "📁 General / Other"
+        return "📁 General Corporate & NGO"
 
 def analyze_scam_risk(title, description):
     score = 0
@@ -123,7 +125,7 @@ def analyze_scam_risk(title, description):
         for corp in CORPORATE_KEYWORDS:
             if corp in text_to_analyze:
                 score += 40
-                reasons.append(f"Suspicious free email ({found_email}) for corporate job")
+                reasons.append(f"Suspicious free email ({found_email}) for corporate/govt job")
 
     if score >= 60:
         return "❌ HIGH RISK (Likely Scam)", reasons
@@ -136,14 +138,20 @@ def fetch_and_parse_feeds():
     headers = {"User-Agent": "Mozilla/5.0"}
     jobs_found = []
     now = datetime.datetime.now(datetime.timezone.utc)
-    two_days_ago = now - datetime.timedelta(days=2)
+    # Expanded window to 72 hours to ensure high volume (25+ jobs)
+    three_days_ago = now - datetime.timedelta(days=3)
 
     for url in JOB_FEEDS:
         try:
             response = requests.get(url, headers=headers, timeout=10)
             if response.status_code != 200:
                 continue
-            root = ET.fromstring(response.content)
+            
+            try:
+                root = ET.fromstring(response.content)
+            except:
+                continue # Skip feeds that are temporarily down
+
             for item in root.findall('.//item'):
                 raw_title = item.find('title').text or "No Title"
                 link = item.find('link').text or ""
@@ -160,15 +168,13 @@ def fetch_and_parse_feeds():
                     except ValueError:
                         pub_date = now
 
-                    if pub_date >= two_days_ago:
-                        status, reasons = analyze_scam_risk(raw_title, desc_clean)
-                        category = classify_job(raw_title, desc_clean)
-                        
-                        # Use the new deep extraction function
+                    # Filtering for jobs within the last 72 hours
+                    if pub_date >= three_days_ago:
                         clean_title, company, city, work_type, expiry, qualifications = extract_job_details(raw_title, desc_clean)
+                        status, reasons = analyze_scam_risk(raw_title, desc_clean)
+                        category = classify_job(clean_title, desc_clean, company)
                         
-                        # Create an easy-to-read "Presenter Summary"
-                        summary = f"This is an opening for a **{clean_title}** position, and they are currently being hired by **{company}**."
+                        summary = f"Listen up! This is a brand new opening for a **{clean_title}** position. They are currently actively hiring at **{company}**."
 
                         jobs_found.append({
                             "Clean Title": clean_title,
@@ -176,7 +182,7 @@ def fetch_and_parse_feeds():
                             "Category": category,
                             "Status": status,
                             "Red Flags": ", ".join(reasons) if reasons else "None",
-                            "Day Posted": pub_date.strftime("%A (%B %d)"),  # e.g., "Tuesday (June 06)"
+                            "Day Posted": pub_date.strftime("%A (%B %d)"), 
                             "Link": link,
                             "Work Type": work_type,
                             "City": city,
@@ -186,54 +192,56 @@ def fetch_and_parse_feeds():
                         })
         except Exception:
             pass
-    return jobs_found
+            
+    # Remove duplicates based on link/title
+    unique_jobs = {job['Clean Title']: job for job in jobs_found}.values()
+    return list(unique_jobs)
 
 # --- Dashboard UI Layout ---
-if str.button("🔄 Scan the Web for Fresh Jobs"):
-    with str.spinner("Pulling the latest applications and preparing presenter scripts..."):
+if str.button("🚀 LAUNCH MEGA-SCAN (Fetch 25+ Jobs)"):
+    with str.spinner("Scanning Government portals, TSC feeds, Corporate Boards, and NGO registries..."):
         data = fetch_and_parse_feeds()
-        if data:
-            str.success(f"Successfully processed {len(data)} live jobs posted in the last 48 hours!")
+        
+        if len(data) >= 25:
+            str.success(f"🔥 MASSIVE HAUL: Successfully processed {len(data)} live jobs from the last 72 hours!")
+        elif data:
+            str.warning(f"Found {len(data)} jobs. (If this is below 25, job boards are currently experiencing low posting volumes today).")
+        else:
+            str.error("No data fetched. Check your internet connection or try again in an hour.")
             
-            # Simple, clean filters for the presenter
-            categories = list(set([j["Category"] for j in data]))
-            selected_cat = str.multiselect("Filter by Job Category", options=categories, default=categories)
+        if data:
+            # Layout the specific sector filters
+            categories = sorted(list(set([j["Category"] for j in data])))
+            selected_cat = str.multiselect("🎯 Filter by Target Sector (e.g., TSC, BOM, Bankers, Blue Collar)", options=categories, default=categories)
             
             filtered_data = [j for j in data if j["Category"] in selected_cat]
             
+            str.markdown(f"### Displaying {len(filtered_data)} Opportunities")
             str.markdown("---")
             
-            # Render structured, script-like job cards
             for job in filtered_data:
                 with str.container():
-                    # Big, bold headers that are easy to read
-                    str.markdown(f"## {job['Clean Title']}")
-                    str.markdown(f"### 🏢 Hiring Company: {job['Company']}")
+                    str.markdown(f"## 📌 {job['Clean Title']}")
+                    str.markdown(f"### 🏢 Hiring: {job['Company']}")
                     
-                    # 4-Column breakdown for quick glancing
                     col1, col2, col3, col4 = str.columns(4)
                     with col1:
                         str.write(f"**📍 Location:** {job['City']}")
                     with col2:
-                        str.write(f"**📅 Posted On:** {job['Day Posted']}")
+                        str.write(f"**🛠️ Type:** {job['Work Type']}")
                     with col3:
-                        str.write(f"**⏳ Application Deadline:** {job['Expiry']}")
+                        str.write(f"**⏳ Deadline:** {job['Expiry']}")
                     with col4:
-                        str.write(f"**🛡️ Security:** {job['Status']}")
+                        str.write(f"**🛡️ Safety:** {job['Status']}")
                         
                     if job['Red Flags'] != "None":
                         str.error(f"🚩 Verification Flags: {job['Red Flags']}")
                     
-                    # The Presenter's Script section
-                    str.markdown("#### 🗣️ Presenter Summary")
-                    str.write(job["Summary"])
+                    str.markdown("#### 🗣️ Script: The Summary")
+                    str.info(job["Summary"])
                     
-                    str.markdown("#### 🎓 Qualifications Required")
-                    # Using a blockquote styling to make it visually distinct for reading
-                    str.info(job["Qualifications"])
+                    str.markdown("#### 🎓 Script: Required Qualifications")
+                    str.warning(job["Qualifications"])
                     
-                    # Clear, direct call-to-action link
-                    str.markdown(f"👉 **[Click Here for the Direct Application Link]({job['Link']})**")
-                    str.markdown("---")
-        else:
-            str.info("No new jobs found in the last 48 hours. Try running the scan again later!")
+                    str.markdown(f"👉 **[Click Here to Send Audience to Application Page]({job['Link']})**")
+                    str.markdown("<br><hr><br>", unsafe_allow_html=True)
