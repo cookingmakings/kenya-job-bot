@@ -9,10 +9,10 @@ import streamlit as st
 from urllib.parse import urlparse
 from duckduckgo_search import DDGS
 
-st.set_page_config(page_title="Kenya Job Hub: Screenshot & Share", layout="wide")
+st.set_page_config(page_title="Kenya Job Hub: Fresh Grads", layout="wide")
 
 st.title("📌 Kenya Job Deep Scanner (Pro)")
-st.markdown("Actively bypassing aggregators using **Deep-Link Verification** and ATS (Applicant Tracking System) extraction.")
+st.markdown("Bypassing aggregators & actively hunting for **Fresh Graduate / Entry Level** opportunities.")
 
 JOB_FEEDS = [
     "https://jobwebkenya.com/feed/",
@@ -32,6 +32,29 @@ SCAM_KEYWORDS = [
     r"training fee", r"uniform fee", r"send money", r"mpesa", r"m-pesa",
     r"deposit", r"bribe", r"pay to work"
 ]
+
+def check_experience_level(title, text):
+    """
+    The Brain: Analyzes the text and destroys jobs that ask for prior experience.
+    """
+    combined = (title + " " + text).lower()
+    
+    # 1. Automatic Approvals (Fast-track these)
+    if any(kw in combined for kw in ["entry level", "fresh graduate", "graduate trainee", "intern", "internship", "attachment", "no experience", "0-1", "0-2"]):
+        return True
+        
+    # 2. Automatic Rejections based on Seniority in Title
+    if any(kw in title.lower() for kw in ["senior", "manager", "director", "head of", "lead", "principal", "chief", "supervisor", "specialist"]):
+        return False
+        
+    # 3. Automatic Rejections based on "Years of Experience"
+    # Matches: "2 years", "3-5 years", "5+ yrs", "two years", "10 years"
+    exp_match = re.search(r'(two|three|four|five|six|seven|eight|nine|ten|[2-9]|[1-9][0-9])\+?\s*(?:to|-)?\s*([0-9]+|two|three|four|five)?\s*(?:years?|yrs)(?:’|s)?\s*(?:of\s*)?(?:working\s*)?(?:post-qualification\s*)?experience', combined)
+    if exp_match:
+        return False
+        
+    # If it doesn't strictly demand 2+ years, it passes the fresh grad check!
+    return True
 
 def analyze_scam_risk(title, description):
     score = 0
@@ -54,9 +77,6 @@ def extract_domain(url):
         return "External Website"
 
 def deep_scrape_job_page(url):
-    """
-    Scrapes for qualifications AND forcefully extracts hidden outbound application links.
-    """
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
         response = requests.get(url, headers=headers, timeout=8)
@@ -65,22 +85,16 @@ def deep_scrape_job_page(url):
         
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # 1. Forcefully hunt for the hidden OUTBOUND link
         outbound_link = None
         base_domain = extract_domain(url)
-        
         for a in soup.find_all('a', href=True):
             href = a['href']
             text = a.text.lower()
-            
-            # If the link leaves the aggregator site
-            if base_domain not in href and "facebook.com" not in href and "twitter.com" not in href and "whatsapp.com" not in href:
-                # Check if it looks like an application portal or button
+            if base_domain not in href and "facebook.com" not in href and "twitter.com" not in href:
                 if any(keyword in text for keyword in ["apply", "click here", "website"]) or any(ats in href for ats in ["workday", "greenhouse", "taleo", "bamboohr", "fuzu", "lever", "breezy"]):
                     outbound_link = href
-                    break # Found the real portal!
+                    break 
                     
-        # 2. Scrape Qualifications
         qualifications_text = ""
         headings = soup.find_all(['h2', 'h3', 'h4', 'strong', 'b'])
         for tag in headings:
@@ -98,16 +112,13 @@ def deep_scrape_job_page(url):
                 qualifications_text = match.group(2).rsplit('.', 1)[0] + "."
 
         if not qualifications_text or len(qualifications_text) < 20:
-            qualifications_text = "• Standard professional requirements apply.\n• (See the direct official application link below for the full checklist)."
+            qualifications_text = "• Certificate, Diploma, or Degree in relevant field.\n• (See the direct official application link below for the full checklist)."
 
         return qualifications_text, outbound_link
     except:
         return None, None
 
 def hunt_for_original_portal(company, job_title, fallback_link):
-    """
-    Uses DuckDuckGo but enforces the 'No Homepages' rule.
-    """
     if company in ["Various", "See details", "Unknown", "Confidential"]:
         return fallback_link
         
@@ -119,23 +130,17 @@ def hunt_for_original_portal(company, job_title, fallback_link):
             results = [r for r in ddgs.text(query, max_results=6)]
             for res in results:
                 url = res['href']
-                
-                # 1. Ignore aggregators
                 if any(bad_site in url.lower() for bad_site in blacklist):
                     continue
-                    
-                # 2. THE NO HOMEPAGES RULE: Check if it's a deep link
                 path = urlparse(url).path
-                # If the URL path is too short (e.g., just "/" or "/home"), it's a homepage. Reject it.
-                if len(path) < 10:
+                if len(path) < 10: # Reject homepages
                     continue 
-                    
-                return url # It's an official deep link!
+                return url 
         return fallback_link 
     except Exception:
         return fallback_link
 
-def fetch_and_scrape_jobs():
+def fetch_and_scrape_jobs(fresh_grads_only=True):
     headers = {"User-Agent": "Mozilla/5.0"}
     links_to_scrape = []
     
@@ -149,11 +154,15 @@ def fetch_and_scrape_jobs():
                 items = root.findall('.//item')
                 random.shuffle(items)
                 
-                for item in items[:10]:
+                for item in items[:15]: # Increased pool to account for discarded senior roles
                     title = item.find('title').text or "No Title"
                     link = item.find('link').text or ""
                     desc = item.find('description').text or ""
                     desc_clean = re.sub('<[^<]+?>', '', desc).strip()
+                    
+                    # INITIAL FILTER: If it looks like a senior role from the preview, skip it immediately!
+                    if fresh_grads_only and not check_experience_level(title, desc_clean):
+                        continue
                     
                     company = title.split(" at ")[1].strip() if " at " in title else "Unknown"
                     clean_title = title.split(" at ")[0].strip() if " at " in title else title
@@ -183,24 +192,29 @@ def fetch_and_scrape_jobs():
     unique_jobs = {job['Clean Title']: job for job in links_to_scrape}.values()
     final_list = list(unique_jobs)
     random.shuffle(final_list)
-    final_list = final_list[:25] 
 
     jobs_found = []
-    my_bar = st.progress(0, text="Deep Scraping & Extracting ATS Links (This takes ~3 mins)...")
+    my_bar = st.progress(0, text="Deep Scraping & Filtering for Fresh Graduates...")
     
+    # We will loop through the list until we successfully find 20 Entry Level jobs
     for idx, job in enumerate(final_list):
-        my_bar.progress(int(((idx + 1) / len(final_list)) * 100), text=f"Scanning {idx+1}/{len(final_list)}: {job['Company']}...")
+        if len(jobs_found) >= 20:
+            break # We found enough fresh grad jobs!
+            
+        my_bar.progress(int(((idx + 1) / len(final_list)) * 100), text=f"Analyzing {idx+1}/{len(final_list)}: {job['Company']}...")
         
-        # 1. Scrape for qualifications AND extract any hidden outbound links
         quals, extracted_outbound_link = deep_scrape_job_page(job['Aggregator Link'])
-        job['Qualifications'] = quals if quals else "• Please view the direct portal below for the full required checklist."
         
-        # 2. Determine the best link to use
+        # DEEP FILTER: Now that we have the full bullet points, check for experience again!
+        if fresh_grads_only and quals:
+            if not check_experience_level(job['Clean Title'], quals):
+                continue # The job secretly required 3 years experience. Trash it!
+                
+        job['Qualifications'] = quals if quals else "• Certificate, Diploma, or Degree.\n• No prior experience strictly requested in description.\n• Please view the direct portal for the full checklist."
+        
         if extracted_outbound_link:
-            # If we successfully ripped the hidden outbound link from the aggregator, use it!
             final_link = extracted_outbound_link
         else:
-            # If it's heavily hidden, hunt the web for a deep link (ignoring homepages)
             final_link = hunt_for_original_portal(job['Company'], job['Clean Title'], job['Aggregator Link'])
         
         job['Direct Link'] = final_link
@@ -213,20 +227,21 @@ def fetch_and_scrape_jobs():
     return jobs_found
 
 # --- UI FOR SCREENSHOTS & SHARING ---
-colA, colB = st.columns([1, 3])
+colA, colB = st.columns([1, 2])
 with colA:
-    if st.button("🔄 FETCH & HUNT OFFICIAL LINKS", use_container_width=True):
+    if st.button("🔄 FETCH ENTRY-LEVEL JOBS", use_container_width=True):
         st.session_state['run_scan'] = True
         
 with colB:
-    st.info("The bot now extracts hidden outbound links and uses Deep-Link Web Hunting to ensure you get exact application pages, not homepages.")
+    # The New Toggle
+    fresh_grads_mode = st.checkbox("🎓 Hunt ONLY for Entry-Level & Fresh Graduate Jobs (No Experience)", value=True)
 
 if st.session_state.get('run_scan', False):
-    data = fetch_and_scrape_jobs()
+    data = fetch_and_scrape_jobs(fresh_grads_only=fresh_grads_mode)
     st.session_state['run_scan'] = False 
     
     if data:
-        st.success(f"✅ Deep Search & Hunt Complete. Showing {len(data)} randomized jobs.")
+        st.success(f"✅ Search Complete. Showing {len(data)} jobs highly suitable for your audience.")
         st.markdown("---")
         
         for job in data:
@@ -245,6 +260,9 @@ if st.session_state.get('run_scan', False):
                     st.success(f"**Security Scan:** {job['Safety']}")
                 else:
                     st.error(f"**Security Scan:** {job['Safety']}")
+                    
+                if fresh_grads_mode:
+                    st.info("🎓 **FRESH GRAD APPROVED:** This job description does not explicitly demand years of prior experience.")
                 
                 st.markdown("#### 🎓 Required Qualifications:")
                 st.info(job["Qualifications"])
