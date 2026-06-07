@@ -9,10 +9,10 @@ import streamlit as st
 from urllib.parse import urlparse
 from duckduckgo_search import DDGS
 
-st.set_page_config(page_title="Kenya Job Hub: Fresh Grads", layout="wide")
+st.set_page_config(page_title="Kenya Job Hub: Fresh Grads & Blue Collar", layout="wide")
 
 st.title("📌 Kenya Job Deep Scanner (Pro)")
-st.markdown("Actively bypassing aggregators & guaranteeing high-volume **Fresh Graduate / Entry Level** opportunities.")
+st.markdown("Actively bypassing aggregators & guaranteeing **15+ Fresh Graduate, Entry Level, and Blue-Collar** opportunities per scan.")
 
 JOB_FEEDS = [
     "https://jobwebkenya.com/feed/",
@@ -33,23 +33,37 @@ SCAM_KEYWORDS = [
     r"deposit", r"bribe", r"pay to work"
 ]
 
+BLUE_COLLAR_KEYWORDS = [
+    "driver", "cleaner", "security", "guard", "plumber", "welder", "mechanic", 
+    "electrician", "mason", "carpenter", "rider", "casual", "factory", "artisan", 
+    "technician", "attendant", "waiter", "waitress", "cook", "chef"
+]
+
 def check_experience_level(title, text):
+    """
+    The Brain: Intelligently filters jobs to ensure Fresh Grads and Blue-Collar workers get options.
+    """
     combined = (title + " " + text).lower()
     
-    # 1. Automatic Approvals
-    if any(kw in combined for kw in ["entry level", "fresh graduate", "graduate trainee", "intern", "internship", "attachment", "no experience", "0-1", "0-2"]):
+    # 1. BLUE-COLLAR BYPASS: Auto-approve manual/artisan roles (They rarely say "Entry Level")
+    if any(kw in title.lower() for kw in BLUE_COLLAR_KEYWORDS):
+        return True
+    
+    # 2. WHITE-COLLAR AUTO-APPROVE: Entry level & Internships
+    if any(kw in combined for kw in ["entry level", "fresh graduate", "graduate trainee", "intern", "internship", "attachment", "no experience", "0-1", "0-2", "1-2 years"]):
         return True
         
-    # 2. Automatic Rejections based on Seniority
-    if any(kw in title.lower() for kw in ["senior", "manager", "director", "head of", "lead", "principal", "chief", "supervisor", "specialist"]):
+    # 3. SENIORITY REJECT: Kill obvious senior white-collar roles
+    if any(kw in title.lower() for kw in ["senior", "manager", "director", "head", "lead", "principal", "chief", "supervisor", "specialist"]):
         return False
         
-    # 3. Automatic Rejections based on Years of Experience
-    exp_match = re.search(r'(two|three|four|five|six|seven|eight|nine|ten|[2-9]|[1-9][0-9])\+?\s*(?:to|-)?\s*([0-9]+|two|three|four|five)?\s*(?:years?|yrs)(?:’|s)?\s*(?:of\s*)?(?:working\s*)?(?:post-qualification\s*)?experience', combined)
+    # 4. STRICT EXPERIENCE REJECT: Kill anything demanding 3 or more years of experience
+    # Matches: "3 years", "5+ years", "ten yrs", etc.
+    exp_match = re.search(r'(three|four|five|six|seven|eight|nine|ten|[3-9]|[1-9][0-9])\+?\s*(?:to|-)?\s*(?:[0-9]+)?\s*(?:years?|yrs)', combined)
     if exp_match:
         return False
         
-    return True
+    return True # Default to passing it if it's vague
 
 def analyze_scam_risk(title, description):
     score = 0
@@ -107,7 +121,7 @@ def deep_scrape_job_page(url):
                 qualifications_text = match.group(2).rsplit('.', 1)[0] + "."
 
         if not qualifications_text or len(qualifications_text) < 20:
-            qualifications_text = "• Certificate, Diploma, or Degree in relevant field.\n• No prior experience strictly requested in description.\n• (See the direct official application link below for the full checklist)."
+            qualifications_text = "• View the direct official application link below for the full skills and requirements checklist."
 
         return qualifications_text, outbound_link
     except:
@@ -149,8 +163,8 @@ def fetch_and_scrape_jobs(fresh_grads_only=True):
                 items = root.findall('.//item')
                 random.shuffle(items)
                 
-                # Pull a larger initial slice per feed to protect high-volume targets
-                for item in items[:25]: 
+                # MASSIVE NET: Pull up to 100 raw jobs PER FEED instead of 15.
+                for item in items[:100]: 
                     title = item.find('title').text or "No Title"
                     link = item.find('link').text or ""
                     desc = item.find('description').text or ""
@@ -173,13 +187,17 @@ def fetch_and_scrape_jobs(fresh_grads_only=True):
                     
                     safety_status = analyze_scam_risk(title, desc_clean)
                     
+                    # Identify if it's blue collar for the UI
+                    is_blue_collar = any(kw in clean_title.lower() for kw in BLUE_COLLAR_KEYWORDS)
+                    
                     links_to_scrape.append({
                         "Clean Title": clean_title,
                         "Company": company,
                         "City": city_found,
                         "Expiry": expiry,
                         "Aggregator Link": link,
-                        "Safety": safety_status
+                        "Safety": safety_status,
+                        "Is Blue Collar": is_blue_collar
                     })
         except:
             pass
@@ -189,10 +207,10 @@ def fetch_and_scrape_jobs(fresh_grads_only=True):
     random.shuffle(final_list)
 
     jobs_found = []
-    my_bar = st.progress(0, text="Deep Scraping & Filtering for Fresh Graduates...")
+    my_bar = st.progress(0, text="Deep Scraping & Filtering for Fresh Grads/Blue Collar...")
     
-    # GUARANTEED VOLUME: The bot will aggressively process until it hits a solid target count
-    target_count = 25 if not fresh_grads_only else 15
+    # GUARANTEED VOLUME: Loop until we hit exactly 15 jobs!
+    target_count = 15
     
     for idx, job in enumerate(final_list):
         if len(jobs_found) >= target_count:
@@ -206,7 +224,7 @@ def fetch_and_scrape_jobs(fresh_grads_only=True):
             if not check_experience_level(job['Clean Title'], quals):
                 continue 
                 
-        job['Qualifications'] = quals if quals else "• Certificate, Diploma, or Degree.\n• No prior experience strictly requested in description.\n• Please view the direct portal for the full checklist."
+        job['Qualifications'] = quals if quals else "• Certificate, Diploma, or relevant skill required.\n• No strict long-term experience requested.\n• Please view the direct portal for the full checklist."
         
         if extracted_outbound_link:
             final_link = extracted_outbound_link
@@ -225,11 +243,11 @@ def fetch_and_scrape_jobs(fresh_grads_only=True):
 # --- UI FOR SCREENSHOTS & SHARING ---
 colA, colB = st.columns([1, 2])
 with colA:
-    if st.button("🔄 FETCH ENTRY-LEVEL JOBS", use_container_width=True):
+    if st.button("🔄 FETCH 15 ENTRY-LEVEL / BLUE COLLAR JOBS", use_container_width=True):
         st.session_state['run_scan'] = True
         
 with colB:
-    fresh_grads_mode = st.checkbox("🎓 Hunt ONLY for Entry-Level & Fresh Graduate Jobs (No Experience)", value=True)
+    fresh_grads_mode = st.checkbox("🎓 Hunt ONLY for Entry-Level & Blue Collar Jobs (Under 3 yrs experience)", value=True)
 
 if st.session_state.get('run_scan', False):
     data = fetch_and_scrape_jobs(fresh_grads_only=fresh_grads_mode)
@@ -257,7 +275,10 @@ if st.session_state.get('run_scan', False):
                     st.error(f"**Security Scan:** {job['Safety']}")
                     
                 if fresh_grads_mode:
-                    st.info("🎓 **FRESH GRAD APPROVED:** This job description does not explicitly demand years of prior experience.")
+                    if job['Is Blue Collar']:
+                        st.info("🛠️ **BLUE-COLLAR APPROVED:** Practical/Manual skills role. Great for non-degree holders.")
+                    else:
+                        st.info("🎓 **ENTRY LEVEL APPROVED:** Suitable for recent graduates (0-2 years experience allowed).")
                 
                 st.markdown("#### 🎓 Required Qualifications:")
                 st.info(job["Qualifications"])
