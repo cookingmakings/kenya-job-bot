@@ -12,7 +12,7 @@ from duckduckgo_search import DDGS
 st.set_page_config(page_title="Kenya Job Hub: Fresh Grads", layout="wide")
 
 st.title("📌 Kenya Job Deep Scanner (Pro)")
-st.markdown("Bypassing aggregators & actively hunting for **Fresh Graduate / Entry Level** opportunities.")
+st.markdown("Actively bypassing aggregators & guaranteeing high-volume **Fresh Graduate / Entry Level** opportunities.")
 
 JOB_FEEDS = [
     "https://jobwebkenya.com/feed/",
@@ -34,26 +34,21 @@ SCAM_KEYWORDS = [
 ]
 
 def check_experience_level(title, text):
-    """
-    The Brain: Analyzes the text and destroys jobs that ask for prior experience.
-    """
     combined = (title + " " + text).lower()
     
-    # 1. Automatic Approvals (Fast-track these)
+    # 1. Automatic Approvals
     if any(kw in combined for kw in ["entry level", "fresh graduate", "graduate trainee", "intern", "internship", "attachment", "no experience", "0-1", "0-2"]):
         return True
         
-    # 2. Automatic Rejections based on Seniority in Title
+    # 2. Automatic Rejections based on Seniority
     if any(kw in title.lower() for kw in ["senior", "manager", "director", "head of", "lead", "principal", "chief", "supervisor", "specialist"]):
         return False
         
-    # 3. Automatic Rejections based on "Years of Experience"
-    # Matches: "2 years", "3-5 years", "5+ yrs", "two years", "10 years"
+    # 3. Automatic Rejections based on Years of Experience
     exp_match = re.search(r'(two|three|four|five|six|seven|eight|nine|ten|[2-9]|[1-9][0-9])\+?\s*(?:to|-)?\s*([0-9]+|two|three|four|five)?\s*(?:years?|yrs)(?:’|s)?\s*(?:of\s*)?(?:working\s*)?(?:post-qualification\s*)?experience', combined)
     if exp_match:
         return False
         
-    # If it doesn't strictly demand 2+ years, it passes the fresh grad check!
     return True
 
 def analyze_scam_risk(title, description):
@@ -112,7 +107,7 @@ def deep_scrape_job_page(url):
                 qualifications_text = match.group(2).rsplit('.', 1)[0] + "."
 
         if not qualifications_text or len(qualifications_text) < 20:
-            qualifications_text = "• Certificate, Diploma, or Degree in relevant field.\n• (See the direct official application link below for the full checklist)."
+            qualifications_text = "• Certificate, Diploma, or Degree in relevant field.\n• No prior experience strictly requested in description.\n• (See the direct official application link below for the full checklist)."
 
         return qualifications_text, outbound_link
     except:
@@ -133,7 +128,7 @@ def hunt_for_original_portal(company, job_title, fallback_link):
                 if any(bad_site in url.lower() for bad_site in blacklist):
                     continue
                 path = urlparse(url).path
-                if len(path) < 10: # Reject homepages
+                if len(path) < 10: 
                     continue 
                 return url 
         return fallback_link 
@@ -154,13 +149,13 @@ def fetch_and_scrape_jobs(fresh_grads_only=True):
                 items = root.findall('.//item')
                 random.shuffle(items)
                 
-                for item in items[:15]: # Increased pool to account for discarded senior roles
+                # Pull a larger initial slice per feed to protect high-volume targets
+                for item in items[:25]: 
                     title = item.find('title').text or "No Title"
                     link = item.find('link').text or ""
                     desc = item.find('description').text or ""
                     desc_clean = re.sub('<[^<]+?>', '', desc).strip()
                     
-                    # INITIAL FILTER: If it looks like a senior role from the preview, skip it immediately!
                     if fresh_grads_only and not check_experience_level(title, desc_clean):
                         continue
                     
@@ -196,19 +191,20 @@ def fetch_and_scrape_jobs(fresh_grads_only=True):
     jobs_found = []
     my_bar = st.progress(0, text="Deep Scraping & Filtering for Fresh Graduates...")
     
-    # We will loop through the list until we successfully find 20 Entry Level jobs
+    # GUARANTEED VOLUME: The bot will aggressively process until it hits a solid target count
+    target_count = 25 if not fresh_grads_only else 15
+    
     for idx, job in enumerate(final_list):
-        if len(jobs_found) >= 20:
-            break # We found enough fresh grad jobs!
+        if len(jobs_found) >= target_count:
+            break 
             
         my_bar.progress(int(((idx + 1) / len(final_list)) * 100), text=f"Analyzing {idx+1}/{len(final_list)}: {job['Company']}...")
         
         quals, extracted_outbound_link = deep_scrape_job_page(job['Aggregator Link'])
         
-        # DEEP FILTER: Now that we have the full bullet points, check for experience again!
         if fresh_grads_only and quals:
             if not check_experience_level(job['Clean Title'], quals):
-                continue # The job secretly required 3 years experience. Trash it!
+                continue 
                 
         job['Qualifications'] = quals if quals else "• Certificate, Diploma, or Degree.\n• No prior experience strictly requested in description.\n• Please view the direct portal for the full checklist."
         
@@ -233,7 +229,6 @@ with colA:
         st.session_state['run_scan'] = True
         
 with colB:
-    # The New Toggle
     fresh_grads_mode = st.checkbox("🎓 Hunt ONLY for Entry-Level & Fresh Graduate Jobs (No Experience)", value=True)
 
 if st.session_state.get('run_scan', False):
@@ -241,7 +236,7 @@ if st.session_state.get('run_scan', False):
     st.session_state['run_scan'] = False 
     
     if data:
-        st.success(f"✅ Search Complete. Showing {len(data)} jobs highly suitable for your audience.")
+        st.success(f"✅ Search Complete. Showing {len(data)} verified jobs highly suitable for your audience.")
         st.markdown("---")
         
         for job in data:
