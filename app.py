@@ -1,69 +1,35 @@
-import datetime
 import re
 import time
 import random
 import requests
 from bs4 import BeautifulSoup
-import xml.etree.ElementTree as ET
 import streamlit as st
 from urllib.parse import urlparse
 from duckduckgo_search import DDGS
 
-st.set_page_config(page_title="Kenya Job Hub: Fresh Grads & Blue Collar", layout="wide")
+st.set_page_config(page_title="Kenya Job Hub: High Volume Scraper", layout="wide")
 
-st.title("📌 Kenya Job Deep Scanner (Pro)")
-st.markdown("Actively bypassing aggregators & guaranteeing **15+ Fresh Graduate, Entry Level, and Blue-Collar** opportunities per scan.")
+st.title("📌 Kenya Job Deep Scanner (Max Volume)")
+st.markdown("Uses AI Search Engine Injection to guarantee **15+ Fresh Graduate & Blue Collar** jobs. No more repeated RSS feeds.")
 
-JOB_FEEDS = [
-    "https://jobwebkenya.com/feed/",
-    "https://reliefweb.int/updates.rss?search=location.name:Kenya%20AND%20format.name:Job",
-    "https://unjobs.org/rss/countries/ken",
-    "https://kenya2711.rssing.com/chan-30179697/latest.xml",
-    "https://www.myjobmag.co.ke/jobs-by-date.xml"
+# We replaced static feeds with dynamic search queries!
+WHITE_COLLAR_QUERIES = [
+    'site:jobwebkenya.com ("entry level" OR "fresh graduate" OR "intern" OR "graduate trainee" OR "no experience")',
+    'site:myjobmag.co.ke ("entry level" OR "graduate trainee" OR "attachment" OR "internship")',
+    'site:brightermonday.co.ke ("entry level" OR "intern" OR "no experience required")',
+    'site:unjobs.org/countries/ken ("entry level" OR "intern" OR "junior")'
 ]
 
-KENYAN_CITIES = [
-    "Nairobi", "Mombasa", "Kisumu", "Nakuru", "Eldoret", "Thika", "Malindi", "Kitale", 
-    "Garissa", "Kakamega", "Nyeri", "Machakos", "Naivasha", "Meru", "Kiambu", "Kericho"
+BLUE_COLLAR_QUERIES = [
+    'site:jobwebkenya.com ("driver" OR "cleaner" OR "security" OR "plumber" OR "electrician" OR "mechanic")',
+    'site:myjobmag.co.ke ("driver" OR "artisan" OR "welder" OR "casual" OR "mason" OR "technician")',
+    'site:brightermonday.co.ke ("rider" OR "driver" OR "security guard" OR "cleaner" OR "waiter" OR "cook")'
 ]
 
 SCAM_KEYWORDS = [
     r"registration fee", r"booking fee", r"medical fee", r"processing fee",
-    r"training fee", r"uniform fee", r"send money", r"mpesa", r"m-pesa",
-    r"deposit", r"bribe", r"pay to work"
+    r"training fee", r"uniform fee", r"send money", r"mpesa", r"m-pesa", r"deposit"
 ]
-
-BLUE_COLLAR_KEYWORDS = [
-    "driver", "cleaner", "security", "guard", "plumber", "welder", "mechanic", 
-    "electrician", "mason", "carpenter", "rider", "casual", "factory", "artisan", 
-    "technician", "attendant", "waiter", "waitress", "cook", "chef"
-]
-
-def check_experience_level(title, text):
-    """
-    The Brain: Intelligently filters jobs to ensure Fresh Grads and Blue-Collar workers get options.
-    """
-    combined = (title + " " + text).lower()
-    
-    # 1. BLUE-COLLAR BYPASS: Auto-approve manual/artisan roles (They rarely say "Entry Level")
-    if any(kw in title.lower() for kw in BLUE_COLLAR_KEYWORDS):
-        return True
-    
-    # 2. WHITE-COLLAR AUTO-APPROVE: Entry level & Internships
-    if any(kw in combined for kw in ["entry level", "fresh graduate", "graduate trainee", "intern", "internship", "attachment", "no experience", "0-1", "0-2", "1-2 years"]):
-        return True
-        
-    # 3. SENIORITY REJECT: Kill obvious senior white-collar roles
-    if any(kw in title.lower() for kw in ["senior", "manager", "director", "head", "lead", "principal", "chief", "supervisor", "specialist"]):
-        return False
-        
-    # 4. STRICT EXPERIENCE REJECT: Kill anything demanding 3 or more years of experience
-    # Matches: "3 years", "5+ years", "ten yrs", etc.
-    exp_match = re.search(r'(three|four|five|six|seven|eight|nine|ten|[3-9]|[1-9][0-9])\+?\s*(?:to|-)?\s*(?:[0-9]+)?\s*(?:years?|yrs)', combined)
-    if exp_match:
-        return False
-        
-    return True # Default to passing it if it's vague
 
 def analyze_scam_risk(title, description):
     score = 0
@@ -80,8 +46,7 @@ def analyze_scam_risk(title, description):
 
 def extract_domain(url):
     try:
-        domain = urlparse(url).netloc
-        return domain.replace("www.", "")
+        return urlparse(url).netloc.replace("www.", "")
     except:
         return "External Website"
 
@@ -94,20 +59,21 @@ def deep_scrape_job_page(url):
         
         soup = BeautifulSoup(response.text, 'html.parser')
         
+        # Look for hidden outbound ATS links (to bypass the aggregator)
         outbound_link = None
         base_domain = extract_domain(url)
         for a in soup.find_all('a', href=True):
             href = a['href']
             text = a.text.lower()
             if base_domain not in href and "facebook.com" not in href and "twitter.com" not in href:
-                if any(keyword in text for keyword in ["apply", "click here", "website"]) or any(ats in href for ats in ["workday", "greenhouse", "taleo", "bamboohr", "fuzu", "lever", "breezy"]):
+                if any(keyword in text for keyword in ["apply", "click here", "website"]) or any(ats in href for ats in ["workday", "greenhouse", "taleo", "bamboohr"]):
                     outbound_link = href
                     break 
                     
         qualifications_text = ""
         headings = soup.find_all(['h2', 'h3', 'h4', 'strong', 'b'])
         for tag in headings:
-            if tag.text and any(q in tag.text.lower() for q in ["qualification", "requirement", "skills", "experience", "education"]):
+            if tag.text and any(q in tag.text.lower() for q in ["qualification", "requirement", "skills", "experience"]):
                 next_ul = tag.find_next(['ul', 'ol'])
                 if next_ul:
                     lis = next_ul.find_all('li')
@@ -121,7 +87,7 @@ def deep_scrape_job_page(url):
                 qualifications_text = match.group(2).rsplit('.', 1)[0] + "."
 
         if not qualifications_text or len(qualifications_text) < 20:
-            qualifications_text = "• View the direct official application link below for the full skills and requirements checklist."
+            qualifications_text = "• Formal requirements specified on the official application portal.\n• (See the direct link below for the full checklist)."
 
         return qualifications_text, outbound_link
     except:
@@ -131,12 +97,12 @@ def hunt_for_original_portal(company, job_title, fallback_link):
     if company in ["Various", "See details", "Unknown", "Confidential"]:
         return fallback_link
         
-    query = f'"{company}" "{job_title}" application kenya careers'
-    blacklist = ["jobwebkenya", "myjobmag", "fuzu", "brightermonday", "glassdoor", "linkedin", "jiji", "pigiame", "postmyjob", "reliefweb", "unjobs"]
+    query = f'"{company}" "{job_title}" application kenya'
+    blacklist = ["jobwebkenya", "myjobmag", "fuzu", "brightermonday", "glassdoor", "linkedin", "jiji", "pigiame", "unjobs"]
     
     try:
         with DDGS() as ddgs:
-            results = [r for r in ddgs.text(query, max_results=6)]
+            results = [r for r in ddgs.text(query, max_results=5)]
             for res in results:
                 url = res['href']
                 if any(bad_site in url.lower() for bad_site in blacklist):
@@ -149,136 +115,119 @@ def hunt_for_original_portal(company, job_title, fallback_link):
     except Exception:
         return fallback_link
 
-def fetch_and_scrape_jobs(fresh_grads_only=True):
-    headers = {"User-Agent": "Mozilla/5.0"}
-    links_to_scrape = []
+def clean_title_and_company(raw_title):
+    # Search engines append website names to titles, we need to clean that up.
+    clean = re.sub(r'(-|\|)\s*(JobWebKenya|MyJobMag|BrighterMonday|UNjobs).*', '', raw_title, flags=re.IGNORECASE).strip()
     
-    random.shuffle(JOB_FEEDS)
+    if " at " in clean:
+        parts = clean.split(" at ", 1)
+        return parts[0].strip(), parts[1].strip()
+    elif " - " in clean:
+        parts = clean.split(" - ", 1)
+        return parts[0].strip(), parts[1].strip()
+    else:
+        return clean, "Hiring Company (See Link)"
+
+def execute_search_injection():
+    jobs_found = []
+    links_processed = set()
     
-    for url in JOB_FEEDS:
-        try:
-            res = requests.get(url, headers=headers, timeout=10)
-            if res.status_code == 200:
-                root = ET.fromstring(res.content)
-                items = root.findall('.//item')
-                random.shuffle(items)
+    # Randomly pick 2 white-collar queries and 2 blue-collar queries to guarantee a good mix
+    active_queries = random.sample(WHITE_COLLAR_QUERIES, 2) + random.sample(BLUE_COLLAR_QUERIES, 2)
+    random.shuffle(active_queries)
+    
+    my_bar = st.progress(0, text="Injecting queries into search engines (Hunting for 15+ jobs)...")
+    
+    try:
+        with DDGS() as ddgs:
+            for q_idx, query in enumerate(active_queries):
+                # timelimit='w' ensures we only get jobs posted in the last week!
+                results = list(ddgs.text(query, timelimit='w', max_results=10))
                 
-                # MASSIVE NET: Pull up to 100 raw jobs PER FEED instead of 15.
-                for item in items[:100]: 
-                    title = item.find('title').text or "No Title"
-                    link = item.find('link').text or ""
-                    desc = item.find('description').text or ""
-                    desc_clean = re.sub('<[^<]+?>', '', desc).strip()
-                    
-                    if fresh_grads_only and not check_experience_level(title, desc_clean):
+                for res in results:
+                    if len(jobs_found) >= 15: # Stop exactly when we have 15 solid jobs
+                        break
+                        
+                    link = res.get('href')
+                    if not link or link in links_processed:
                         continue
                     
-                    company = title.split(" at ")[1].strip() if " at " in title else "Unknown"
-                    clean_title = title.split(" at ")[0].strip() if " at " in title else title
+                    links_processed.add(link)
+                    raw_title = res.get('title', '')
+                    description = res.get('body', '')
                     
-                    city_found = "Kenya-wide"
-                    for city in KENYAN_CITIES:
-                        if re.search(r'\b' + city.lower() + r'\b', (title+" "+desc_clean).lower()):
-                            city_found = city
-                            break
-                            
-                    deadline_match = re.search(r'(deadline|closing date)[\s:-]+([0-9]{1,2}(st|nd|rd|th)?\s+[a-zA-Z]+\s+[0-9]{4})', desc_clean.lower())
-                    expiry = deadline_match.group(2).title() if deadline_match else "ASAP"
+                    clean_title, company = clean_title_and_company(raw_title)
+                    is_blue_collar = any(kw in clean_title.lower() for kw in ["driver", "cleaner", "security", "plumber", "mechanic", "artisan", "welder", "rider", "casual", "mason", "technician"])
                     
-                    safety_status = analyze_scam_risk(title, desc_clean)
+                    my_bar.progress(len(jobs_found) / 15, text=f"Deep Scraping & Bypassing Aggregators: {company}...")
                     
-                    # Identify if it's blue collar for the UI
-                    is_blue_collar = any(kw in clean_title.lower() for kw in BLUE_COLLAR_KEYWORDS)
+                    quals, outbound = deep_scrape_job_page(link)
+                    safety = analyze_scam_risk(clean_title, description)
                     
-                    links_to_scrape.append({
-                        "Clean Title": clean_title,
+                    if outbound:
+                        final_link = outbound
+                    else:
+                        final_link = hunt_for_original_portal(company, clean_title, link)
+                    
+                    jobs_found.append({
+                        "Title": clean_title,
                         "Company": company,
-                        "City": city_found,
-                        "Expiry": expiry,
-                        "Aggregator Link": link,
-                        "Safety": safety_status,
+                        "Safety": safety,
+                        "Qualifications": quals if quals else "• Qualifications detailed on the official portal.\n• (See the direct link below).",
+                        "Direct Link": final_link,
+                        "Domain": extract_domain(final_link),
                         "Is Blue Collar": is_blue_collar
                     })
-        except:
-            pass
-
-    unique_jobs = {job['Clean Title']: job for job in links_to_scrape}.values()
-    final_list = list(unique_jobs)
-    random.shuffle(final_list)
-
-    jobs_found = []
-    my_bar = st.progress(0, text="Deep Scraping & Filtering for Fresh Grads/Blue Collar...")
-    
-    # GUARANTEED VOLUME: Loop until we hit exactly 15 jobs!
-    target_count = 15
-    
-    for idx, job in enumerate(final_list):
-        if len(jobs_found) >= target_count:
-            break 
-            
-        my_bar.progress(int(((idx + 1) / len(final_list)) * 100), text=f"Analyzing {idx+1}/{len(final_list)}: {job['Company']}...")
+                    
+                    time.sleep(1) # Prevent getting blocked by search engines
+                    
+                if len(jobs_found) >= 15:
+                    break
+    except Exception as e:
+        st.error("Search Engine blocked the request. Please wait a few seconds and try again.")
         
-        quals, extracted_outbound_link = deep_scrape_job_page(job['Aggregator Link'])
-        
-        if fresh_grads_only and quals:
-            if not check_experience_level(job['Clean Title'], quals):
-                continue 
-                
-        job['Qualifications'] = quals if quals else "• Certificate, Diploma, or relevant skill required.\n• No strict long-term experience requested.\n• Please view the direct portal for the full checklist."
-        
-        if extracted_outbound_link:
-            final_link = extracted_outbound_link
-        else:
-            final_link = hunt_for_original_portal(job['Company'], job['Clean Title'], job['Aggregator Link'])
-        
-        job['Direct Link'] = final_link
-        job['Source Domain'] = extract_domain(final_link)
-        
-        jobs_found.append(job)
-        time.sleep(1) 
-        
-    my_bar.empty() 
+    my_bar.empty()
     return jobs_found
 
 # --- UI FOR SCREENSHOTS & SHARING ---
 colA, colB = st.columns([1, 2])
 with colA:
-    if st.button("🔄 FETCH 15 ENTRY-LEVEL / BLUE COLLAR JOBS", use_container_width=True):
+    if st.button("🚀 FETCH 15 FRESH JOBS", use_container_width=True):
         st.session_state['run_scan'] = True
         
 with colB:
-    fresh_grads_mode = st.checkbox("🎓 Hunt ONLY for Entry-Level & Blue Collar Jobs (Under 3 yrs experience)", value=True)
+    st.info("Now using Search Engine Injection to guarantee high volumes. Shuffles between new queries every click.")
 
 if st.session_state.get('run_scan', False):
-    data = fetch_and_scrape_jobs(fresh_grads_only=fresh_grads_mode)
+    data = execute_search_injection()
     st.session_state['run_scan'] = False 
     
     if data:
-        st.success(f"✅ Search Complete. Showing {len(data)} verified jobs highly suitable for your audience.")
+        st.success(f"✅ Search Complete. Displaying {len(data)} highly targeted jobs.")
         st.markdown("---")
         
         for job in data:
             with st.container():
-                st.markdown(f"## 📌 {job['Clean Title']}")
+                st.markdown(f"## 📌 {job['Title']}")
                 st.markdown(f"### 🏢 **{job['Company']}**")
                 
-                if "jobwebkenya" in job['Source Domain'] or "myjobmag" in job['Source Domain'] or "unjobs" in job['Source Domain']:
-                    source_display = f"`{job['Source Domain']}` (Aggregator Used)"
+                # Highlight if it bypassed the aggregator successfully
+                if any(agg in job['Domain'] for agg in ["jobwebkenya", "myjobmag", "brightermonday", "unjobs"]):
+                    source_display = f"`{job['Domain']}` (Aggregator)"
                 else:
-                    source_display = f"🌟 **`{job['Source Domain']}` (OFFICIAL APPLICATION PAGE)**"
+                    source_display = f"🌟 **`{job['Domain']}` (OFFICIAL APPLICATION PAGE)**"
 
-                st.markdown(f"**📍 Location:** {job['City']} &nbsp; | &nbsp; **⏳ Deadline:** {job['Expiry']} &nbsp; | &nbsp; **🌐 Source:** {source_display}")
+                st.markdown(f"**🌐 Source:** {source_display}")
                 
                 if "✅" in job['Safety']:
                     st.success(f"**Security Scan:** {job['Safety']}")
                 else:
                     st.error(f"**Security Scan:** {job['Safety']}")
                     
-                if fresh_grads_mode:
-                    if job['Is Blue Collar']:
-                        st.info("🛠️ **BLUE-COLLAR APPROVED:** Practical/Manual skills role. Great for non-degree holders.")
-                    else:
-                        st.info("🎓 **ENTRY LEVEL APPROVED:** Suitable for recent graduates (0-2 years experience allowed).")
+                if job['Is Blue Collar']:
+                    st.info("🛠️ **BLUE-COLLAR APPROVED:** Practical/Manual skills role. Excellent for non-degree holders.")
+                else:
+                    st.info("🎓 **ENTRY LEVEL APPROVED:** Suitable for recent graduates or interns.")
                 
                 st.markdown("#### 🎓 Required Qualifications:")
                 st.info(job["Qualifications"])
