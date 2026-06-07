@@ -7,12 +7,12 @@ from bs4 import BeautifulSoup
 import xml.etree.ElementTree as ET
 import streamlit as st
 from urllib.parse import urlparse
-from googlesearch import search  # The new Web Search Engine
+from duckduckgo_search import DDGS  # The new Unblockable Search Engine
 
 st.set_page_config(page_title="Kenya Job Hub: Screenshot & Share", layout="wide")
 
 st.title("📌 Kenya Job Deep Scanner (Pro)")
-st.markdown("Generates fresh jobs, scrapes qualifications, and actively hunts Google for the **Original Company Portal**.")
+st.markdown("Actively bypassing aggregators using **DuckDuckGo AI Search** to find the original hiring company's direct application portal.")
 
 JOB_FEEDS = [
     "https://jobwebkenya.com/feed/",
@@ -55,25 +55,27 @@ def extract_domain(url):
 
 def hunt_for_original_portal(company, job_title, fallback_link):
     """
-    Actively searches Google for the company's real application page,
-    ignoring aggregator websites.
+    Uses DuckDuckGo to aggressively bypass aggregators and find the true company portal.
     """
     if company in ["Various", "See details", "Unknown", "Confidential"]:
         return fallback_link
         
-    query = f'"{company}" "{job_title}" careers jobs kenya application'
+    query = f'"{company}" "{job_title}" application kenya careers'
     
-    # Aggregators we want to ignore in the search results
-    blacklist = ["jobwebkenya", "myjobmag", "fuzu", "brightermonday", "glassdoor", "linkedin", "jiji", "pigiame"]
+    # The list of sites we want to IGNORE so we get the real company
+    blacklist = ["jobwebkenya", "myjobmag", "fuzu", "brightermonday", "glassdoor", "linkedin", "jiji", "pigiame", "postmyjob", "reliefweb", "unjobs"]
     
     try:
-        # Search the web and look at the top 4 results
-        for url in search(query, num_results=4):
-            # If the URL doesn't belong to a known aggregator, it's likely the official site!
-            if not any(bad_site in url.lower() for bad_site in blacklist):
-                return url
-        return fallback_link # If it only finds aggregators, return the original link
-    except:
+        with DDGS() as ddgs:
+            # Get top 5 search results
+            results = [r for r in ddgs.text(query, max_results=5)]
+            for res in results:
+                url = res['href']
+                # If the search result is NOT a known aggregator, we found the official site!
+                if not any(bad_site in url.lower() for bad_site in blacklist):
+                    return url
+        return fallback_link 
+    except Exception:
         return fallback_link
 
 def deep_scrape_job_page(url):
@@ -88,7 +90,7 @@ def deep_scrape_job_page(url):
         headings = soup.find_all(['h2', 'h3', 'h4', 'strong', 'b'])
         
         for tag in headings:
-            if tag.text and any(q in tag.text.lower() for q in ["qualification", "requirement", "skills", "experience"]):
+            if tag.text and any(q in tag.text.lower() for q in ["qualification", "requirement", "skills", "experience", "education"]):
                 next_ul = tag.find_next(['ul', 'ol'])
                 if next_ul:
                     lis = next_ul.find_all('li')
@@ -102,7 +104,7 @@ def deep_scrape_job_page(url):
                 qualifications_text = match.group(2).rsplit('.', 1)[0] + "."
 
         if not qualifications_text or len(qualifications_text) < 20:
-            qualifications_text = "• Standard professional requirements apply.\n• (See direct application link below for the full checklist)."
+            qualifications_text = "• Standard professional requirements apply.\n• (See the direct official application link below for the full checklist)."
 
         return qualifications_text
     except:
@@ -159,23 +161,23 @@ def fetch_and_scrape_jobs():
     final_list = final_list[:25] 
 
     jobs_found = []
-    my_bar = st.progress(0, text="Deep Scraping & Hunting for Official Portals (May take 3+ mins)...")
+    my_bar = st.progress(0, text="Deep Scraping & Hunting for Official Portals (This will take 3 mins)...")
     
     for idx, job in enumerate(final_list):
         my_bar.progress(int(((idx + 1) / len(final_list)) * 100), text=f"Hunting {idx+1}/{len(final_list)}: {job['Company']}...")
         
         # 1. Scrape the aggregator for the bullets
         quals = deep_scrape_job_page(job['Aggregator Link'])
-        job['Qualifications'] = quals if quals else "• Please view the direct portal for the full required checklist."
+        job['Qualifications'] = quals if quals else "• Please view the direct portal below for the full required checklist."
         
-        # 2. actively hunt Google for the REAL link
+        # 2. actively hunt DuckDuckGo for the REAL link (Bypassing Google's blocks)
         real_link = hunt_for_original_portal(job['Company'], job['Clean Title'], job['Aggregator Link'])
         
         job['Direct Link'] = real_link
         job['Source Domain'] = extract_domain(real_link)
         
         jobs_found.append(job)
-        time.sleep(1) # Delay so Google doesn't block the bot
+        time.sleep(1) # Delay so DuckDuckGo doesn't block the bot
         
     my_bar.empty() 
     return jobs_found
@@ -187,7 +189,7 @@ with colA:
         st.session_state['run_scan'] = True
         
 with colB:
-    st.info("The bot will now actively search Google to bypass aggregators and find the original hiring company's website.")
+    st.info("The bot uses DuckDuckGo AI search to aggressively bypass aggregators and find the original company websites.")
 
 if st.session_state.get('run_scan', False):
     data = fetch_and_scrape_jobs()
@@ -203,10 +205,10 @@ if st.session_state.get('run_scan', False):
                 st.markdown(f"### 🏢 **{job['Company']}**")
                 
                 # Check if the bot successfully bypassed the aggregator
-                if "jobwebkenya" in job['Source Domain'] or "myjobmag" in job['Source Domain']:
-                    source_display = f"`{job['Source Domain']}` (Aggregator Fallback)"
+                if "jobwebkenya" in job['Source Domain'] or "myjobmag" in job['Source Domain'] or "unjobs" in job['Source Domain']:
+                    source_display = f"`{job['Source Domain']}` (Aggregator Used)"
                 else:
-                    source_display = f"🌟 **`{job['Source Domain']}` (OFFICIAL PORTAL FOUND)**"
+                    source_display = f"🌟 **`{job['Source Domain']}` (OFFICIAL COMPANY PORTAL)**"
 
                 st.markdown(f"**📍 Location:** {job['City']} &nbsp; | &nbsp; **⏳ Deadline:** {job['Expiry']} &nbsp; | &nbsp; **🌐 Source:** {source_display}")
                 
